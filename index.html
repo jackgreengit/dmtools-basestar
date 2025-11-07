@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DMTools - D&D Lighting & Sound Controller</title>
+  <link rel="stylesheet" href="css/main.css">
+</head>
+<body>
+  <!-- Loading screen -->
+  <div id="loading" class="loading">
+    <div class="loading-spinner"></div>
+    <p>Initializing DMTools...</p>
+  </div>
+
+  <!-- Main application content -->
+  <div id="app-content" style="display: none;">
+    <header>
+      <h1>DMTools</h1>
+      <p class="subtitle">D&D Lighting & Sound Controller</p>
+
+      <div class="connection-status">
+        <div class="status-item">
+          <span class="status-label">WLED:</span>
+          <span id="status-wled" class="status-disconnected">Checking...</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Home Assistant:</span>
+          <span id="status-ha" class="status-disconnected">Checking...</span>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <!-- Error message display -->
+      <div id="error-message" class="error-message" style="display: none;"></div>
+
+      <!-- Notification display -->
+      <div id="notification" class="notification" style="display: none;"></div>
+
+      <!-- Scenes section -->
+      <section class="control-section">
+        <h2>Scenes</h2>
+        <div id="scenes-container" class="button-grid">
+          <!-- Scene buttons will be generated dynamically -->
+        </div>
+      </section>
+
+      <!-- Triggers section -->
+      <section class="control-section">
+        <h2>Triggers</h2>
+        <div id="triggers-container" class="button-grid">
+          <!-- Trigger buttons will be generated dynamically -->
+        </div>
+      </section>
+
+      <!-- Volume controls -->
+      <section class="control-section">
+        <h2>Volume Controls</h2>
+        <div class="volume-controls">
+          <div class="volume-control">
+            <label for="volume-music">
+              Music
+              <span id="volume-music-value" class="volume-value">60</span>%
+            </label>
+            <input type="range" id="volume-music" min="0" max="1" step="0.01" value="0.6">
+          </div>
+
+          <div class="volume-control">
+            <label for="volume-ambient">
+              Ambient
+              <span id="volume-ambient-value" class="volume-value">40</span>%
+            </label>
+            <input type="range" id="volume-ambient" min="0" max="1" step="0.01" value="0.4">
+          </div>
+
+          <div class="volume-control">
+            <label for="volume-trigger">
+              Triggers
+              <span id="volume-trigger-value" class="volume-value">80</span>%
+            </label>
+            <input type="range" id="volume-trigger" min="0" max="1" step="0.01" value="0.8">
+          </div>
+        </div>
+      </section>
+
+      <!-- Global controls -->
+      <section class="control-section">
+        <div class="global-controls">
+          <button id="stop-all" class="stop-button">Stop All (ESC)</button>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <p>Press ESC to stop all scenes and effects</p>
+    </footer>
+  </div>
+
+  <!-- Load scripts -->
+  <script src="js/config-manager.js"></script>
+  <script src="js/audio-engine.js"></script>
+  <script src="js/lighting.js"></script>
+  <script src="js/scene-manager.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

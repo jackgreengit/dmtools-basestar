@@ -1,0 +1,20 @@
+# Configuration with sensitive data
+config.json
+
+# Machine-readable state for Claude (contains project learnings)
+.dmtools-state.json
+
+# User's personal sound files
+sounds/music/*
+!sounds/music/.gitkeep
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

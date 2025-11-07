@@ -1,0 +1,121 @@
+{
+  "lighting": {
+    "wled": {
+      "enabled": true,
+      "ip": "192.168.0.33",
+      "port": 80
+    },
+    "homeAssistant": {
+      "enabled": true,
+      "ip": "192.168.0.18",
+      "port": 8123,
+      "token": "YOUR_LONG_LIVED_ACCESS_TOKEN_HERE"
+    }
+  },
+  "audio": {
+    "defaultVolumes": {
+      "music": 0.6,
+      "ambient": 0.4,
+      "trigger": 0.8
+    }
+  },
+  "scenes": {
+    "tavern": {
+      "name": "Tavern",
+      "audio": {
+        "music": "sounds/music/tavern.mp3",
+        "ambient": ["sounds/ambient/tavern-chatter.mp3", "sounds/ambient/fireplace.mp3"]
+      },
+      "lighting": {
+        "wled": {
+          "brightness": 128,
+          "color": [255, 140, 60],
+          "effect": "Solid"
+        }
+      }
+    },
+    "combat": {
+      "name": "Combat",
+      "audio": {
+        "music": "playlists/combat.m3u"
+      },
+      "lighting": {
+        "wled": {
+          "brightness": 200,
+          "color": [255, 0, 0],
+          "effect": "Chase"
+        }
+      }
+    },
+    "dungeon": {
+      "name": "Dungeon",
+      "audio": {
+        "ambient": ["sounds/ambient/dripping-water.mp3", "sounds/ambient/cave-wind.mp3"]
+      },
+      "lighting": {
+        "wled": {
+          "brightness": 64,
+          "color": [100, 100, 150],
+          "effect": "Solid"
+        }
+      }
+    },
+    "castle": {
+      "name": "Castle",
+      "audio": {
+        "ambient": "sounds/ambient/castle-ambience.mp3"
+      },
+      "lighting": {
+        "wled": {
+          "brightness": 150,
+          "color": [200, 180, 255],
+          "effect": "Solid"
+        }
+      }
+    },
+    "oldHouse": {
+      "name": "Old House",
+      "audio": {
+        "ambient": ["sounds/ambient/creaking-wood.mp3", "sounds/ambient/wind-howling.mp3"]
+      },
+      "lighting": {
+        "wled": {
+          "brightness": 80,
+          "color": [150, 150, 120],
+          "effect": "Flicker"
+        }
+      }
+    }
+  },
+  "triggers": {
+    "lightning": {
+      "name": "Lightning Storm",
+      "sequence": [
+        {
+          "delay": 0,
+          "lighting": {
+            "wled": {
+              "brightness": 255,
+              "color": [255, 255, 255],
+              "duration": 100
+            }
+          }
+        },
+        {
+          "delay": 1500,
+          "audio": {
+            "trigger": "sounds/triggers/thunder.mp3"
+          }
+        },
+        {
+          "delay": 3000,
+          "lighting": {
+            "wled": {
+              "restore": true
+            }
+          }
+        }
+      ]
+    }
+  }
+}
