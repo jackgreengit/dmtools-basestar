@@ -30,7 +30,52 @@ A browser-based controller for synchronizing lighting effects and audio playback
    - `sounds/ambient/` - Ambient sound effects
    - `sounds/triggers/` - One-shot trigger sounds (thunder, etc.)
    - `playlists/` - .m3u playlist files
-5. Open `index.html` in your web browser
+
+## Running the Server
+
+DMTools includes a robust server management system with automatic restart capabilities.
+
+### Quick Start (Recommended)
+
+Start the server with automatic health monitoring and restart:
+
+```bash
+./server-manager.sh monitor
+```
+
+This will start the server and continuously monitor it, automatically restarting if it becomes unresponsive.
+
+### Basic Commands
+
+```bash
+# Start the server
+./server-manager.sh start
+
+# Stop the server
+./server-manager.sh stop
+
+# Restart the server
+./server-manager.sh restart
+
+# Check server status
+./server-manager.sh status
+```
+
+### Original Simple Server
+
+You can also use the original simple server (without auto-restart):
+
+```bash
+./start-server.sh
+```
+
+### Accessing the Application
+
+Once the server is running, access DMTools at:
+- **Local**: http://localhost:8080
+- **Network**: http://YOUR_IP:8080
+
+For detailed server management options, including systemd service setup and troubleshooting, see [SERVER_MANAGEMENT.md](SERVER_MANAGEMENT.md).
 
 ## Configuration
 
@@ -44,7 +89,9 @@ Edit `config.json` to configure your setup:
     "wled": {
       "enabled": true,
       "ip": "192.168.1.100",
-      "port": 80
+      "port": 80,
+      "overrideDDP": true,
+      "reenableDDPOnStop": false
     },
     "homeAssistant": {
       "enabled": true,
@@ -140,6 +187,17 @@ Triggers are timed sequences of audio and lighting events:
 - `audio.trigger`: Trigger sound to play
 - `lighting.wled`: WLED state to apply
 - `lighting.wled.restore`: Set to `true` to restore previous lighting state
+
+### DDP Override Settings
+
+If your WLED instance is receiving DDP (Distributed Display Protocol) input from another source (like LedFx, xLights, etc.), DMTools can block this input and maintain full control:
+
+- `overrideDDP`: (default: `true`) - Blocks all DDP/realtime packets when DMTools sends commands, ensuring DMTools maintains complete control until you stop
+- `reenableDDPOnStop`: (default: `false`) - Re-enables DDP mode when you press "Stop All", returning control to the external source
+
+**How it works:** When `overrideDDP` is enabled, DMTools sets WLED's live override (`lor: 2`) which completely blocks incoming DDP packets. This ensures your scenes and effects stay active without being interrupted by external DDP sources.
+
+**Example use case:** If you're running LedFx for music visualization but want DMTools to take control during your D&D session, set `overrideDDP: true` and `reenableDDPOnStop: true`. DMTools will block LedFx's DDP packets during your session, and when you click "Stop All", control returns to LedFx.
 
 ## WLED Effects
 

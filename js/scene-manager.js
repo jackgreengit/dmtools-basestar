@@ -1,6 +1,6 @@
 /**
- * Scene Manager
- * Orchestrates audio and lighting for scenes and triggers
+ * Trigger Manager
+ * Orchestrates audio and lighting for triggers
  */
 
 class SceneManager {
@@ -9,64 +9,16 @@ class SceneManager {
     this.audioEngine = audioEngine;
     this.lightingController = lightingController;
 
-    this.currentScene = null;
     this.activeEffects = [];
+    this.activeScene = null;  // Track currently active ambient scene
   }
 
   /**
-   * Activate a scene
-   * @param {string} sceneId - The scene identifier
+   * Initialize - ensure lights are off
    */
-  async activateScene(sceneId) {
-    const scene = this.configManager.getScene(sceneId);
-
-    if (!scene) {
-      console.error(`Scene not found: ${sceneId}`);
-      return;
-    }
-
-    console.log(`Activating scene: ${scene.name}`);
-
-    // Stop current scene if one is active
-    if (this.currentScene) {
-      await this.stopCurrentScene();
-    }
-
-    this.currentScene = sceneId;
-
-    // Apply audio configuration
-    if (scene.audio) {
-      // Play music if specified
-      if (scene.audio.music) {
-        await this.audioEngine.playMusic(scene.audio.music);
-      }
-
-      // Play ambient sounds if specified
-      if (scene.audio.ambient) {
-        await this.audioEngine.playAmbient(scene.audio.ambient);
-      }
-    }
-
-    // Apply lighting configuration
-    if (scene.lighting) {
-      await this.lightingController.applySceneLighting(scene.lighting);
-    }
-
-    console.log(`Scene activated: ${scene.name}`);
-  }
-
-  /**
-   * Stop the current scene
-   */
-  async stopCurrentScene() {
-    if (!this.currentScene) return;
-
-    console.log(`Stopping scene: ${this.currentScene}`);
-
-    // Stop all audio
-    this.audioEngine.stopAll();
-
-    this.currentScene = null;
+  async initialize() {
+    console.log('Initializing trigger manager - turning off all lights');
+    await this.lightingController.turnOffAll();
   }
 
   /**
@@ -83,15 +35,84 @@ class SceneManager {
 
     console.log(`Executing trigger: ${trigger.name}`);
 
-    // Save current lighting state before the effect
-    await this.lightingController.saveWLEDState();
+    // Stop any currently playing triggers with fade-out
+    await this.audioEngine.stopTriggers();
 
-    // Execute the trigger sequence
+    // Clone and adapt the trigger sequence to match ambient lighting if active
+    let sequence = trigger.sequence;
     if (trigger.sequence && Array.isArray(trigger.sequence)) {
-      await this.executeSequence(trigger.sequence);
+      sequence = this.adaptTriggerToAmbient(trigger.sequence);
+      await this.executeSequence(sequence);
     }
 
-    console.log(`Trigger completed: ${trigger.name}`);
+    // After trigger completes, restore ambient scene lighting if one is active
+    if (this.activeScene) {
+      console.log(`Trigger completed: ${trigger.name} - restoring ambient scene lighting`);
+      const scene = this.configManager.getScene(this.activeScene);
+      if (scene && scene.lighting) {
+        // Get fade duration from config
+        const lightingFadeDuration = this.configManager.getConfig()?.audio?.lightingFadeDuration || 0;
+        await this.lightingController.applySceneLighting(scene.lighting, lightingFadeDuration);
+      }
+    } else {
+      // No active scene, just turn off lights
+      console.log(`Trigger completed: ${trigger.name} - turning off lights`);
+      await this.lightingController.turnOffAll();
+    }
+  }
+
+  /**
+   * Adapt trigger sequence to use ambient scene lighting for fade targets
+   * @param {Array} sequence - Original trigger sequence
+   * @returns {Array} Adapted sequence
+   */
+  adaptTriggerToAmbient(sequence) {
+    // Clone the sequence first
+    const clonedSequence = JSON.parse(JSON.stringify(sequence));
+
+    // Add effect: "Solid" to all lighting events to override any ongoing effects
+    clonedSequence.forEach(event => {
+      if (event.lighting && event.lighting.wled) {
+        event.lighting.wled.effect = "Solid";
+      }
+    });
+
+    // If no ambient scene is active, return sequence with Solid effect added
+    if (!this.activeScene) {
+      return clonedSequence;
+    }
+
+    const scene = this.configManager.getScene(this.activeScene);
+    if (!scene || !scene.lighting || !scene.lighting.wled) {
+      return clonedSequence;
+    }
+
+    // Get ambient lighting values
+    const ambientBrightness = scene.lighting.wled.brightness || 128;
+    const ambientColor = scene.lighting.wled.color || [128, 128, 128];
+
+    console.log(`Adapting trigger to ambient: brightness=${ambientBrightness}, color=[${ambientColor}]`);
+
+    // Replace "fade to ambient" targets
+    // We identify these by looking for events with:
+    // - Non-zero duration (indicates a fade)
+    // - Not at the very start (delay 0)
+    return clonedSequence.map(event => {
+      // Check if this is a fade-to event (has duration and lighting)
+      if (event.lighting &&
+          event.lighting.wled &&
+          event.lighting.wled.duration > 0 &&
+          event.delay > 0) {
+
+        // Replace with ambient lighting values
+        event.lighting.wled.brightness = ambientBrightness;
+        event.lighting.wled.color = [...ambientColor];
+
+        console.log(`  Replaced fade target at delay ${event.delay}ms`);
+      }
+
+      return event;
+    });
   }
 
   /**
@@ -106,13 +127,10 @@ class SceneManager {
       }
 
       // Execute audio events
+      // Note: Music is managed independently and not affected by scenes or triggers
       if (event.audio) {
         if (event.audio.trigger) {
           await this.audioEngine.playTrigger(event.audio.trigger);
-        }
-
-        if (event.audio.music) {
-          await this.audioEngine.playMusic(event.audio.music);
         }
 
         if (event.audio.ambient) {
@@ -123,12 +141,7 @@ class SceneManager {
       // Execute lighting events
       if (event.lighting) {
         if (event.lighting.wled) {
-          // Check for restore command
-          if (event.lighting.wled.restore) {
-            await this.lightingController.restoreWLEDState();
-          } else {
-            await this.lightingController.applyWLEDConfig(event.lighting.wled);
-          }
+          await this.lightingController.applyWLEDConfig(event.lighting.wled);
         }
 
         if (event.lighting.homeAssistant) {
@@ -139,37 +152,11 @@ class SceneManager {
   }
 
   /**
-   * Stop all audio and lighting
+   * Turn off all lights
    */
-  async stopAll() {
-    await this.stopCurrentScene();
+  async turnOffLights() {
     await this.lightingController.turnOffAll();
-    console.log('Stopped all scenes and effects');
-  }
-
-  /**
-   * Get current scene information
-   * @returns {Object|null}
-   */
-  getCurrentScene() {
-    if (!this.currentScene) return null;
-
-    return {
-      id: this.currentScene,
-      ...this.configManager.getScene(this.currentScene)
-    };
-  }
-
-  /**
-   * Get list of all available scenes
-   * @returns {Array}
-   */
-  getAvailableScenes() {
-    const scenes = this.configManager.getScenes();
-    return Object.keys(scenes).map(id => ({
-      id,
-      name: scenes[id].name
-    }));
+    console.log('All lights turned off');
   }
 
   /**
@@ -185,33 +172,86 @@ class SceneManager {
   }
 
   /**
-   * Add a custom scene dynamically
-   * @param {string} sceneId - Unique scene identifier
-   * @param {Object} sceneConfig - Scene configuration
+   * Get list of all available ambient scenes
+   * @returns {Array}
    */
-  addCustomScene(sceneId, sceneConfig) {
-    // Note: This only adds to runtime, not persisted to config.json
-    if (!this.configManager.config.scenes) {
-      this.configManager.config.scenes = {};
-    }
-
-    this.configManager.config.scenes[sceneId] = sceneConfig;
-    console.log(`Custom scene added: ${sceneId}`);
+  getAvailableScenes() {
+    const scenes = this.configManager.getScenes();
+    return Object.keys(scenes).map(id => ({
+      id,
+      name: scenes[id].name
+    }));
   }
 
   /**
-   * Add a custom trigger dynamically
-   * @param {string} triggerId - Unique trigger identifier
-   * @param {Object} triggerConfig - Trigger configuration
+   * Start or toggle an ambient scene
+   * @param {string} sceneId - The scene identifier
    */
-  addCustomTrigger(triggerId, triggerConfig) {
-    // Note: This only adds to runtime, not persisted to config.json
-    if (!this.configManager.config.triggers) {
-      this.configManager.config.triggers = {};
+  async startScene(sceneId) {
+    const scene = this.configManager.getScene(sceneId);
+
+    if (!scene) {
+      console.error(`Scene not found: ${sceneId}`);
+      return;
     }
 
-    this.configManager.config.triggers[triggerId] = triggerConfig;
-    console.log(`Custom trigger added: ${triggerId}`);
+    // If this scene is already active, stop it
+    if (this.activeScene === sceneId) {
+      await this.stopScene();
+      return;
+    }
+
+    // Stop any currently active scene
+    if (this.activeScene) {
+      await this.stopScene();
+    }
+
+    console.log(`Starting scene: ${scene.name}`);
+    this.activeScene = sceneId;
+
+    // Get lighting fade duration from config
+    const lightingFadeDuration = this.configManager.getConfig()?.audio?.lightingFadeDuration || 0;
+
+    // Play ambient audio only (will fade out old ambient automatically)
+    // Music is managed independently and not affected by scenes
+    if (scene.audio) {
+      if (scene.audio.ambient) {
+        await this.audioEngine.playAmbient(scene.audio.ambient);
+      }
+    }
+
+    // Apply lighting with fade
+    if (scene.lighting) {
+      await this.lightingController.applySceneLighting(scene.lighting, lightingFadeDuration);
+    }
+  }
+
+  /**
+   * Stop the currently active ambient scene
+   */
+  async stopScene() {
+    if (!this.activeScene) return;
+
+    console.log('Stopping active scene');
+
+    // Get lighting fade duration from config
+    const lightingFadeDuration = this.configManager.getConfig()?.audio?.lightingFadeDuration || 0;
+
+    // Stop ambient audio only (will fade out) - music continues independently
+    this.audioEngine.stopAmbient();
+
+    // Turn off lights with fade
+    await this.lightingController.turnOffAll(null, lightingFadeDuration);
+
+    this.activeScene = null;
+  }
+
+  /**
+   * Get the currently active scene ID
+   * @returns {string|null}
+   */
+  getActiveScene() {
+    return this.activeScene;
   }
 
   /**

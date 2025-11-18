@@ -1,0 +1,20 @@
+[Unit]
+Description=DMTools D&D Lighting and Sound Controller Web Server
+After=network.target
+
+[Service]
+Type=simple
+User=%u
+WorkingDirectory=/mnt/configs/dmtools-basestar
+ExecStart=/usr/bin/python3 -m http.server 8080
+Restart=always
+RestartSec=10
+StandardOutput=append:/mnt/configs/dmtools-basestar/server.log
+StandardError=append:/mnt/configs/dmtools-basestar/server.log
+
+# Restart policy
+StartLimitInterval=200
+StartLimitBurst=5
+
+[Install]
+WantedBy=multi-user.target

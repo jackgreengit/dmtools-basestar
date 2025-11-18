@@ -163,6 +163,22 @@ class ConfigManager {
   getDefaultVolume(type) {
     return this.config?.audio?.defaultVolumes?.[type] || 0.5;
   }
+
+  /**
+   * Check if DDP override is enabled
+   * @returns {boolean}
+   */
+  shouldOverrideDDP() {
+    return this.config?.lighting?.wled?.overrideDDP !== false;
+  }
+
+  /**
+   * Check if DDP should be re-enabled on stop
+   * @returns {boolean}
+   */
+  shouldReenableDDPOnStop() {
+    return this.config?.lighting?.wled?.reenableDDPOnStop === true;
+  }
 }
 
 // Export singleton instance

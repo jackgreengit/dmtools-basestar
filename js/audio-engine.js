@@ -24,8 +24,10 @@ class AudioEngine {
 
     // Playlist management
     this.playlists = {
-      music: null,
-      currentIndex: 0
+      music: null,           // Original playlist array
+      musicShuffled: null,   // Shuffled version of playlist
+      currentIndex: 0,
+      shuffle: false         // Whether shuffle is enabled
     };
 
     // Volume levels
@@ -44,8 +46,8 @@ class AudioEngine {
   initialize() {
     if (this.initialized) return;
 
-    // Create audio elements
-    this.audioElements.music = this.createAudioElement('music');
+    // Music element will be created when needed with proper source
+    this.audioElements.music = null;
 
     console.log('Audio engine initialized');
     this.initialized = true;
@@ -54,11 +56,25 @@ class AudioEngine {
   /**
    * Create an audio element with proper configuration
    * @param {string} type - The audio type (music, ambient, trigger)
+   * @param {string} source - The audio file path (optional, for per-file volume)
    * @returns {HTMLAudioElement}
    */
-  createAudioElement(type) {
+  createAudioElement(type, source = null) {
     const audio = new Audio();
-    audio.volume = this.volumes[type];
+
+    // Apply base category volume
+    let volume = this.volumes[type];
+
+    // Apply per-file volume adjustment if configured
+    if (source) {
+      const fileVolumes = this.configManager.getConfig()?.audio?.fileVolumes || {};
+      if (fileVolumes[source] !== undefined) {
+        volume *= fileVolumes[source];
+        console.log(`Applied file volume for ${source}: ${fileVolumes[source]} (final: ${volume.toFixed(2)})`);
+      }
+    }
+
+    audio.volume = Math.min(1, volume);
 
     // Music and ambient should loop by default
     if (type === 'music' || type === 'ambient') {
@@ -110,14 +126,73 @@ class AudioEngine {
   }
 
   /**
-   * Load and play music track or playlist
-   * @param {string} source - Path to audio file or .m3u playlist
-   * @param {boolean} loop - Whether to loop (default: true)
+   * Shuffle an array (Fisher-Yates algorithm)
+   * @param {Array} array - Array to shuffle
+   * @returns {Array} Shuffled copy of the array
    */
-  async playMusic(source, loop = true) {
+  shuffleArray(array) {
+    const shuffled = [...array];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled;
+  }
+
+  /**
+   * Load and play music track or playlist
+   * @param {string|Array} source - Path to audio file, .m3u playlist, or array of tracks
+   * @param {boolean} loop - Whether to loop (default: true)
+   * @param {boolean} shuffle - Whether to shuffle playlist (default: false)
+   */
+  async playMusic(source, loop = true, shuffle = false) {
     if (!source) return;
 
-    this.stopMusic();
+    await this.stopMusic();
+
+    // Handle array of tracks
+    if (Array.isArray(source)) {
+      this.playlists.music = source;
+      this.playlists.shuffle = shuffle;
+      this.playlists.currentIndex = 0;
+
+      // Create shuffled version if needed
+      if (shuffle) {
+        this.playlists.musicShuffled = this.shuffleArray(source);
+      } else {
+        this.playlists.musicShuffled = null;
+      }
+
+      const playlist = shuffle ? this.playlists.musicShuffled : this.playlists.music;
+
+      if (playlist.length === 0) {
+        console.error('No tracks in playlist');
+        return;
+      }
+
+      // Create new music element
+      this.audioElements.music = this.createAudioElement('music', playlist[0]);
+      this.audioElements.music.src = playlist[0];
+      this.audioElements.music.loop = false; // We'll handle looping manually
+
+      // Set up playlist handling
+      this.audioElements.music.addEventListener('ended', () => {
+        this.playNextInPlaylist();
+      });
+
+      this.tracks.music = playlist[0];
+
+      try {
+        await this.audioElements.music.play();
+        console.log(`Playing music: ${playlist[0]} (playlist mode, shuffle: ${shuffle})`);
+      } catch (error) {
+        console.error('Error playing music:', error);
+      }
+      return;
+    }
+
+    // Create new music element with source for per-file volume
+    this.audioElements.music = this.createAudioElement('music', source);
 
     // Check if source is a playlist
     if (source.endsWith('.m3u')) {
@@ -128,18 +203,29 @@ class AudioEngine {
       }
 
       this.playlists.music = tracks;
+      this.playlists.shuffle = shuffle;
       this.playlists.currentIndex = 0;
+
+      // Create shuffled version if needed
+      if (shuffle) {
+        this.playlists.musicShuffled = this.shuffleArray(tracks);
+      } else {
+        this.playlists.musicShuffled = null;
+      }
+
+      const playlist = shuffle ? this.playlists.musicShuffled : tracks;
 
       // Set up playlist handling
       this.audioElements.music.addEventListener('ended', () => {
         this.playNextInPlaylist();
       });
 
-      this.audioElements.music.src = tracks[0];
+      this.audioElements.music.src = playlist[0];
       this.audioElements.music.loop = false; // We'll handle looping manually
     } else {
       // Single file
       this.playlists.music = null;
+      this.playlists.musicShuffled = null;
       this.audioElements.music.src = source;
       this.audioElements.music.loop = loop;
     }
@@ -160,25 +246,137 @@ class AudioEngine {
   playNextInPlaylist() {
     if (!this.playlists.music || this.playlists.music.length === 0) return;
 
-    this.playlists.currentIndex = (this.playlists.currentIndex + 1) % this.playlists.music.length;
-    const nextTrack = this.playlists.music[this.playlists.currentIndex];
+    const playlist = this.playlists.shuffle ? this.playlists.musicShuffled : this.playlists.music;
+
+    this.playlists.currentIndex = (this.playlists.currentIndex + 1) % playlist.length;
+    const nextTrack = playlist[this.playlists.currentIndex];
 
     this.audioElements.music.src = nextTrack;
+    this.tracks.music = nextTrack;
+
     this.audioElements.music.play().catch(error => {
       console.error('Error playing next track:', error);
     });
+
+    console.log(`Now playing: ${nextTrack}`);
   }
 
   /**
-   * Stop music playback
+   * Skip to next track (manual skip)
    */
-  stopMusic() {
-    if (this.audioElements.music) {
+  skipNext() {
+    if (!this.playlists.music || this.playlists.music.length === 0) {
+      console.log('No playlist active');
+      return;
+    }
+
+    console.log('Skipping to next track');
+    this.playNextInPlaylist();
+  }
+
+  /**
+   * Skip to previous track
+   */
+  skipPrevious() {
+    if (!this.playlists.music || this.playlists.music.length === 0) {
+      console.log('No playlist active');
+      return;
+    }
+
+    const playlist = this.playlists.shuffle ? this.playlists.musicShuffled : this.playlists.music;
+
+    // Go to previous track
+    this.playlists.currentIndex = (this.playlists.currentIndex - 1 + playlist.length) % playlist.length;
+    const prevTrack = playlist[this.playlists.currentIndex];
+
+    this.audioElements.music.src = prevTrack;
+    this.tracks.music = prevTrack;
+
+    this.audioElements.music.play().catch(error => {
+      console.error('Error playing previous track:', error);
+    });
+
+    console.log(`Now playing: ${prevTrack}`);
+  }
+
+  /**
+   * Get current track information
+   * @returns {Object|null} Current track info
+   */
+  getCurrentTrack() {
+    if (!this.audioElements.music || !this.tracks.music) {
+      return null;
+    }
+
+    const playlist = this.playlists.music
+      ? (this.playlists.shuffle ? this.playlists.musicShuffled : this.playlists.music)
+      : null;
+
+    return {
+      path: this.tracks.music,
+      name: this.tracks.music.split('/').pop(),
+      isPlaying: !this.audioElements.music.paused,
+      isPaused: this.audioElements.music.paused,
+      currentTime: this.audioElements.music.currentTime,
+      duration: this.audioElements.music.duration,
+      isPlaylist: playlist !== null,
+      playlistLength: playlist ? playlist.length : 0,
+      currentIndex: playlist ? this.playlists.currentIndex : -1,
+      shuffle: this.playlists.shuffle
+    };
+  }
+
+  /**
+   * Pause music playback
+   */
+  pauseMusic() {
+    if (this.audioElements.music && !this.audioElements.music.paused) {
       this.audioElements.music.pause();
-      this.audioElements.music.currentTime = 0;
+      console.log('Music paused');
+    }
+  }
+
+  /**
+   * Resume music playback
+   */
+  resumeMusic() {
+    if (this.audioElements.music && this.audioElements.music.paused) {
+      this.audioElements.music.play().catch(error => {
+        console.error('Error resuming music:', error);
+      });
+      console.log('Music resumed');
+    }
+  }
+
+  /**
+   * Seek to a specific time in the current track
+   * @param {number} time - Time in seconds
+   */
+  seekMusic(time) {
+    if (this.audioElements.music) {
+      this.audioElements.music.currentTime = time;
+      console.log(`Seeked to ${time.toFixed(2)}s`);
+    }
+  }
+
+  /**
+   * Stop music playback with fade-out
+   * @param {number} fadeDuration - Fade duration in milliseconds (uses config if not specified)
+   */
+  async stopMusic(fadeDuration = null) {
+    // Use config fade duration if not specified
+    if (fadeDuration === null) {
+      fadeDuration = this.configManager.getConfig()?.audio?.fadeDuration || 1000;
+    }
+
+    if (this.audioElements.music) {
+      await this.fadeOut(this.audioElements.music, fadeDuration);
     }
     this.tracks.music = null;
     this.playlists.music = null;
+    this.playlists.musicShuffled = null;
+    this.playlists.currentIndex = 0;
+    this.playlists.shuffle = false;
   }
 
   /**
@@ -186,7 +384,7 @@ class AudioEngine {
    * @param {string|Array<string>} sources - Path(s) to ambient audio file(s)
    */
   async playAmbient(sources) {
-    this.stopAmbient();
+    await this.stopAmbient();
 
     if (!sources) return;
 
@@ -195,7 +393,7 @@ class AudioEngine {
 
     // Create and play audio elements for each ambient layer
     for (const source of sourceArray) {
-      const audio = this.createAudioElement('ambient');
+      const audio = this.createAudioElement('ambient', source);
       audio.src = source;
 
       this.audioElements.ambient.push(audio);
@@ -211,13 +409,57 @@ class AudioEngine {
   }
 
   /**
-   * Stop all ambient sounds
+   * Fade out audio element
+   * @param {HTMLAudioElement} audio - Audio element to fade out
+   * @param {number} duration - Fade duration in milliseconds
+   * @returns {Promise}
    */
-  stopAmbient() {
-    this.audioElements.ambient.forEach(audio => {
-      audio.pause();
-      audio.currentTime = 0;
+  fadeOut(audio, duration = 1000) {
+    return new Promise((resolve) => {
+      if (!audio || audio.paused) {
+        resolve();
+        return;
+      }
+
+      const startVolume = audio.volume;
+      const steps = 50; // Number of fade steps
+      const stepDuration = duration / steps;
+      const volumeStep = startVolume / steps;
+      let currentStep = 0;
+
+      const fadeInterval = setInterval(() => {
+        currentStep++;
+        const newVolume = Math.max(0, startVolume - (volumeStep * currentStep));
+        audio.volume = newVolume;
+
+        if (currentStep >= steps || audio.volume === 0) {
+          clearInterval(fadeInterval);
+          audio.pause();
+          audio.currentTime = 0;
+          audio.volume = startVolume; // Reset volume for future use
+          resolve();
+        }
+      }, stepDuration);
     });
+  }
+
+  /**
+   * Stop all ambient sounds with fade-out
+   * @param {number} fadeDuration - Fade duration in milliseconds (uses config if not specified)
+   */
+  async stopAmbient(fadeDuration = null) {
+    // Use config fade duration if not specified
+    if (fadeDuration === null) {
+      fadeDuration = this.configManager.getConfig()?.audio?.fadeDuration || 1000;
+    }
+
+    // Fade out all ambient tracks simultaneously
+    const fadePromises = this.audioElements.ambient.map(audio =>
+      this.fadeOut(audio, fadeDuration)
+    );
+
+    await Promise.all(fadePromises);
+
     this.audioElements.ambient = [];
     this.tracks.ambient = [];
   }
@@ -230,7 +472,7 @@ class AudioEngine {
   async playTrigger(source) {
     if (!source) return null;
 
-    const audio = this.createAudioElement('trigger');
+    const audio = this.createAudioElement('trigger', source);
     audio.src = source;
 
     // Remove from tracking when finished
@@ -291,6 +533,27 @@ class AudioEngine {
    */
   getVolume(type) {
     return this.volumes[type];
+  }
+
+  /**
+   * Stop all trigger sounds with fade-out
+   * @param {number} fadeDuration - Fade duration in milliseconds (uses config if not specified)
+   */
+  async stopTriggers(fadeDuration = null) {
+    // Use config fade duration if not specified
+    if (fadeDuration === null) {
+      fadeDuration = this.configManager.getConfig()?.audio?.fadeDuration || 1000;
+    }
+
+    // Fade out all trigger tracks simultaneously
+    const fadePromises = this.audioElements.trigger.map(audio =>
+      this.fadeOut(audio, fadeDuration)
+    );
+
+    await Promise.all(fadePromises);
+
+    this.audioElements.trigger = [];
+    this.tracks.trigger = [];
   }
 
   /**

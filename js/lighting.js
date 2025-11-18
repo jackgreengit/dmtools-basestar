@@ -7,11 +7,6 @@ class LightingController {
   constructor(configManager) {
     this.configManager = configManager;
 
-    // Store previous state for restoration
-    this.previousState = {
-      wled: null
-    };
-
     // Connection status
     this.status = {
       wled: false,
@@ -112,48 +107,26 @@ class LightingController {
   }
 
   /**
-   * Save current WLED state for later restoration
-   */
-  async saveWLEDState() {
-    if (!this.configManager.isWLEDEnabled() || !this.status.wled) return;
-
-    try {
-      const config = this.configManager.getWLEDConfig();
-      const url = `http://${config.ip}:${config.port}/json/state`;
-
-      const response = await fetch(url);
-      if (response.ok) {
-        this.previousState.wled = await response.json();
-        console.log('WLED state saved');
-      }
-    } catch (error) {
-      console.error('Error saving WLED state:', error);
-    }
-  }
-
-  /**
-   * Restore previously saved WLED state
-   */
-  async restoreWLEDState() {
-    if (!this.previousState.wled) {
-      console.warn('No previous WLED state to restore');
-      return;
-    }
-
-    await this.setWLEDState(this.previousState.wled);
-    console.log('WLED state restored');
-  }
-
-  /**
    * Set WLED state
    * @param {Object} state - WLED state object
+   * @param {boolean} overrideDDP - If true, disable DDP/live mode to override external control (uses config default if not specified)
    */
-  async setWLEDState(state) {
+  async setWLEDState(state, overrideDDP = null) {
     if (!this.configManager.isWLEDEnabled()) return;
 
     try {
       const config = this.configManager.getWLEDConfig();
       const url = `http://${config.ip}:${config.port}/json/state`;
+
+      // Use config setting if not explicitly specified
+      const shouldOverride = overrideDDP !== null ? overrideDDP : this.configManager.shouldOverrideDDP();
+
+      // Override DDP input if requested
+      if (shouldOverride) {
+        // lor: 2 = Disable realtime/live mode until reboot or manual re-enable
+        // This prevents DDP packets from overriding our commands
+        state.lor = 2;
+      }
 
       const response = await fetch(url, {
         method: 'POST',
@@ -165,6 +138,8 @@ class LightingController {
 
       if (!response.ok) {
         console.error('WLED state change failed:', response.statusText);
+      } else {
+        console.log('WLED state updated', shouldOverride ? '(DDP blocked)' : '');
       }
     } catch (error) {
       console.error('Error setting WLED state:', error);
@@ -201,13 +176,32 @@ class LightingController {
         'Breathe': 2,
         'Wipe': 3,
         'Chase': 28,
+        'Fire': 44,
         'Flicker': 96,
-        'Fire': 44
+        'Candle Multi': 88
       };
 
       const effectId = effectMap[config.effect] || 0;
       if (!state.seg) state.seg = [{}];
       state.seg[0].fx = effectId;
+    }
+
+    // Add effect speed if specified (0-255, lower = slower)
+    if (config.speed !== undefined) {
+      if (!state.seg) state.seg = [{}];
+      state.seg[0].sx = Math.min(255, Math.max(0, config.speed));
+    }
+
+    // Add effect intensity if specified (0-255, lower = more subtle)
+    if (config.intensity !== undefined) {
+      if (!state.seg) state.seg = [{}];
+      state.seg[0].ix = Math.min(255, Math.max(0, config.intensity));
+    }
+
+    // Add transition time if specified (in deciseconds, 0-255)
+    // duration is specified in ms, WLED uses deciseconds (1/10 second)
+    if (config.duration !== undefined) {
+      state.transition = Math.min(255, Math.round(config.duration / 100));
     }
 
     await this.setWLEDState(state);
@@ -248,13 +242,22 @@ class LightingController {
   /**
    * Apply lighting configuration from scene
    * @param {Object} lightingConfig - Lighting configuration from scene
+   * @param {number} fadeDuration - Optional fade duration in milliseconds
    */
-  async applySceneLighting(lightingConfig) {
+  async applySceneLighting(lightingConfig, fadeDuration = null) {
     if (!lightingConfig) return;
 
     // Apply WLED configuration
     if (lightingConfig.wled) {
-      await this.applyWLEDConfig(lightingConfig.wled);
+      // Clone config to avoid modifying original
+      const wledConfig = { ...lightingConfig.wled };
+
+      // Add fade transition if specified
+      if (fadeDuration !== null && fadeDuration > 0) {
+        wledConfig.duration = fadeDuration;
+      }
+
+      await this.applyWLEDConfig(wledConfig);
     }
 
     // Apply Home Assistant commands
@@ -302,11 +305,70 @@ class LightingController {
   }
 
   /**
-   * Turn off all lights
+   * Restore previous WLED state (for now, just turn off)
+   * TODO: Implement state saving/restoration
    */
-  async turnOffAll() {
+  async restoreWLEDState() {
+    if (!this.configManager.isWLEDEnabled()) return;
+
+    // For now, just turn off the lights
+    // Future enhancement: save state before trigger and restore it here
+    await this.setWLEDState({ on: false });
+    console.log('WLED state restored (turned off)');
+  }
+
+  /**
+   * Re-enable DDP/live mode on WLED
+   * Call this to return control to external DDP sources
+   */
+  async enableWLEDLiveMode() {
+    if (!this.configManager.isWLEDEnabled()) return;
+
+    try {
+      const config = this.configManager.getWLEDConfig();
+      const url = `http://${config.ip}:${config.port}/json/state`;
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          lor: 0  // Reset live override to allow realtime/DDP to work again
+        })
+      });
+
+      if (response.ok) {
+        console.log('WLED live/DDP mode re-enabled');
+      }
+    } catch (error) {
+      console.error('Error enabling WLED live mode:', error);
+    }
+  }
+
+  /**
+   * Turn off all lights
+   * @param {boolean} reenableDDP - If true, re-enable DDP mode after turning off (uses config default if not specified)
+   * @param {number} fadeDuration - Optional fade duration in milliseconds
+   */
+  async turnOffAll(reenableDDP = null, fadeDuration = null) {
     if (this.configManager.isWLEDEnabled()) {
-      await this.setWLEDState({ on: false });
+      const state = { on: false };
+
+      // Add fade transition if specified
+      if (fadeDuration !== null && fadeDuration > 0) {
+        state.transition = Math.min(255, Math.round(fadeDuration / 100));
+      }
+
+      await this.setWLEDState(state);
+
+      // Use config setting if not explicitly specified
+      const shouldReenable = reenableDDP !== null ? reenableDDP : this.configManager.shouldReenableDDPOnStop();
+
+      // Optionally re-enable DDP to return control to external source
+      if (shouldReenable) {
+        await this.enableWLEDLiveMode();
+      }
     }
 
     // Note: Turning off Home Assistant lights would need specific entity IDs

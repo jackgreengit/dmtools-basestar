@@ -7,6 +7,21 @@ config.json
 # User's personal sound files
 sounds/music/*
 !sounds/music/.gitkeep
+sounds/ambient/*
+!sounds/ambient/.gitkeep
+sounds/triggers/*
+!sounds/triggers/.gitkeep
+
+# User's personal music library (copyrighted)
+music/
+music-index.json
+
+# User's playlists
+playlists/*.m3u
+
+# Server management files
+.server.pid
+server.log
 
 # OS files
 .DS_Store
